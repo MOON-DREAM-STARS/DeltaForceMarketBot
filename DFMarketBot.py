@@ -6,6 +6,7 @@ from backend.BuyBot import BuyBot
 from backend.utils import *
 import keyboard
 
+
 class KeyMonitor(QObject):
     key_pressed = pyqtSignal(int)
 
@@ -20,6 +21,7 @@ class KeyMonitor(QObject):
         elif event.name == 'f9':
             self.key_pressed.emit(1)
             print('停止循环')
+
 
 class Worker(QThread):
     update_signal = pyqtSignal(int)
@@ -61,34 +63,43 @@ class Worker(QThread):
                     current_convertible = self.is_convertible
                     current_key_mode = self.is_key_mode
                     self.param_lock.unlock()
-                    
+
                     # 进入商品页面
-                    mouse_click(self.mouse_position, num = 1)
+                    mouse_click(self.mouse_position, num=1)
 
                     # 检测逻辑
-                    lowest_price = self.buybot.detect_price(is_convertible=current_convertible, debug_mode=False)
+                    lowest_price = self.buybot.detect_price(
+                        is_convertible=current_convertible, debug_mode=False)
                     self.update_signal.emit(lowest_price)
-                    
+
                     if current_key_mode:
                         # 钥匙卡模式
                         if lowest_price > current_ideal:
-                            print('当前价格：', lowest_price, '高于理想价格', current_ideal, '，免费刷新价格')
-                            self.buybot.freerefresh(good_postion=self.mouse_position)
+                            print('当前价格：', lowest_price, '高于理想价格',
+                                  current_ideal, '，免费刷新价格')
+                            self.buybot.freerefresh(
+                                good_postion=self.mouse_position)
                         else:
-                            print('当前价格：', lowest_price, '低于理想价格', current_ideal, '，购买一张后循环结束')
+                            print('当前价格：', lowest_price, '低于理想价格',
+                                  current_ideal, '，购买一张后循环结束')
                             self.buybot.refresh(is_convertible=False)
                             self.set_running(False)
                             print('停止循环')
                     else:
                         # 正常模式
                         if lowest_price > current_unacceptable:
-                            print('当前价格：', lowest_price, '高于最高价格', current_unacceptable, '，免费刷新价格')
-                            self.buybot.freerefresh(good_postion=self.mouse_position)
+                            print('当前价格：', lowest_price, '高于最高价格',
+                                  current_unacceptable, '，免费刷新价格')
+                            self.buybot.freerefresh(
+                                good_postion=self.mouse_position)
                         elif lowest_price > current_ideal:
-                            print('当前价格：', lowest_price, '高于理想价格', current_ideal, '，刷新价格')
-                            self.buybot.refresh(is_convertible=current_convertible)
+                            print('当前价格：', lowest_price, '高于理想价格',
+                                  current_ideal, '，刷新价格')
+                            self.buybot.refresh(
+                                is_convertible=current_convertible)
                         else:
-                            print('当前价格：', lowest_price, '低于理想价格', current_ideal, '，开始购买')
+                            print('当前价格：', lowest_price, '低于理想价格',
+                                  current_ideal, '，开始购买')
                             self.buybot.buy(is_convertible=current_convertible)
                 except Exception as e:
                     print(f"操作失败: {str(e)}")
@@ -105,11 +116,13 @@ class Worker(QThread):
         self.is_convertible = convertible
         self.is_key_mode = key_mode
         self.param_lock.unlock()
+
     def set_running(self, state):
         """线程安全更新运行状态"""
         self.lock.lock()
         self._is_running = state
         self.lock.unlock()
+
 
 def runApp():
     app = QtWidgets.QApplication([])
@@ -126,8 +139,8 @@ def runApp():
 
     # 创建监控线程
     key_monitor = KeyMonitor()
-    worker = Worker(BuyBot())
-    
+    worker = Worker(BuyBot(ocr_engine='paddleocr'))  # 或 'easyocr'
+
     # 信号连接
     def handle_key_event(x):
         if x == 0:
@@ -135,22 +148,25 @@ def runApp():
         worker.set_running(x == 0)
 
     key_monitor.key_pressed.connect(handle_key_event)
-    
+
     def handle_text_change():
         try:
             ideal = int(mainWindow.textEdit_ideal_price.toPlainText())
-            unaccept = int(mainWindow.textEdit_unacceptable_price.toPlainText())
+            unaccept = int(
+                mainWindow.textEdit_unacceptable_price.toPlainText())
             loop_gap = int(mainWindow.textEdit_loop_gap.toPlainText())
             is_convertible = mainWindow.is_convertiable.isChecked()
             is_key_mode = mainWindow.is_key_mode.isChecked()
-            worker.update_params(ideal, unaccept, is_convertible, is_key_mode, loop_gap)
+            worker.update_params(
+                ideal, unaccept, is_convertible, is_key_mode, loop_gap)
             mainWindow.label_lowest_price_value.setStyleSheet("color: black;")
         except ValueError:
             mainWindow.label_lowest_price_value.setStyleSheet("color: red;")
 
     # 确保两个输入框都连接
     mainWindow.textEdit_ideal_price.textChanged.connect(handle_text_change)
-    mainWindow.textEdit_unacceptable_price.textChanged.connect(handle_text_change)
+    mainWindow.textEdit_unacceptable_price.textChanged.connect(
+        handle_text_change)
     mainWindow.textEdit_loop_gap.textChanged.connect(handle_text_change)
     mainWindow.is_convertiable.stateChanged.connect(handle_text_change)
     mainWindow.is_key_mode.stateChanged.connect(handle_text_change)
@@ -159,8 +175,10 @@ def runApp():
     worker.start()
     app.exec_()
 
+
 def main():
     return runApp()
+
 
 if __name__ == "__main__":
     print("正在初始化")
