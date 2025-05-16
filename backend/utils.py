@@ -2,56 +2,72 @@
 
 import pyautogui
 import numpy as np
+import mss
+from PIL import Image
 
-def is_windowized(window_title:str):
+
+def is_windowized(window_title: str):
     '''
     判断目标是否窗口化
     '''
     # 获取当前所有窗口的标题
     window_titles = [window.title for window in pyautogui.getAllWindows()]
-    
+
     # 检查是否存在deltaforce窗口
     if window_title in window_titles:
         return True
     else:
         return False
 
-def get_window_postion(target_app:str):
+
+def get_window_postion(target_app: str):
     '''
     获取目标窗口的坐标
     '''
     window_info = pyautogui.getWindowsWithTitle(target_app)[0]
     return [window_info.left, window_info.top, window_info.right, window_info.bottom]
 
-def get_screenshot(debug_mode = False):
-    '''
-    全屏截图函数
-    '''
-    # 对整个屏幕进行截图
-    screenshot = pyautogui.screenshot()
-    if debug_mode:
-        screenshot.save('screenshot.png')
-    return screenshot
 
-def get_windowshot(range:list, debug_mode = False):
+def get_screenshot(debug_mode=False):
     '''
-    范围截图函数
+    全屏截图函数，使用mss加速
+    '''
+    with mss.mss() as sct:
+        monitor = sct.monitors[1]  # 主屏
+        img = sct.grab(monitor)
+        screenshot = Image.frombytes('RGB', img.size, img.rgb)
+        if debug_mode:
+            screenshot.save('screenshot.png')
+        return screenshot
 
-    range：截图范围，[left, top, right, bottom]
+
+def get_windowshot(range: list, debug_mode=False):
     '''
-    # 对范围内截图
-    if range[0] < 1:
+    范围截图函数，使用mss加速
+
+    range：截图范围，[left, top, right, bottom]，支持比例
+    '''
+    with mss.mss() as sct:
         screen_size = pyautogui.size()
-        range = [int(screen_size.width * range[0]), 
-                 int(screen_size.height * range[1]), 
-                 int(screen_size.width * range[2]), 
-                 int(screen_size.height * range[3])]
-    screenshot = pyautogui.screenshot(region=(range[0], range[1], range[2]-range[0], range[3]-range[1]))
-    if debug_mode:
-        screenshot.save('screenshot.png')
-    return screenshot
+        if range[0] < 1:
+            range = [int(screen_size.width * range[0]),
+                     int(screen_size.height * range[1]),
+                     int(screen_size.width * range[2]),
+                     int(screen_size.height * range[3])]
+        monitor = {
+            "left": range[0],
+            "top": range[1],
+            "width": range[2] - range[0],
+            "height": range[3] - range[1]
+        }
+        img = sct.grab(monitor)
+        screenshot = Image.frombytes('RGB', img.size, img.rgb)
+        if debug_mode:
+            screenshot.save('screenshot.png')
+        return screenshot
 
-def mouse_click(positon:list, num:int = 1):
+
+def mouse_click(positon: list, num: int = 1):
     '''
     postion：鼠标点击位置，[x, y]
 
@@ -68,14 +84,17 @@ def mouse_click(positon:list, num:int = 1):
         pyautogui.mouseDown()
         pyautogui.mouseUp()
 
+
 def get_mouse_position():
     '''
     获取鼠标当前位置
     '''
     return list(pyautogui.position())
 
+
 def main():
     get_screenshot(debug_mode=True)
+
 
 if __name__ == "__main__":
     main()
