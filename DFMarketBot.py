@@ -6,6 +6,8 @@ from backend.BuyBot import BuyBot
 from backend.utils import *
 import keyboard
 
+import threading
+
 
 class KeyMonitor(QObject):
     key_pressed = pyqtSignal(int)
@@ -15,12 +17,12 @@ class KeyMonitor(QObject):
         keyboard.on_press(self.handle_key)
 
     def handle_key(self, event):
-        if event.name == 'f8':
+        if event.name == "f8":
             self.key_pressed.emit(0)
-            print('开始循环')
-        elif event.name == 'f9':
+            print("开始循环")
+        elif event.name == "f9":
             self.key_pressed.emit(1)
-            print('停止循环')
+            print("停止循环")
 
 
 class Worker(QThread):
@@ -67,39 +69,63 @@ class Worker(QThread):
                     # 进入商品页面
                     mouse_click(self.mouse_position, num=1)
 
+                    # 无论是否is_convertible，都先点击最大购买量
+                    threading.Thread(
+                        target=mouse_click,
+                        args=(self.buybot.postion_isconvertible_max_shopping_number,),
+                    ).start()
+
                     # 检测逻辑
                     lowest_price = self.buybot.detect_price(
-                        is_convertible=current_convertible, debug_mode=False)
+                        is_convertible=current_convertible, debug_mode=False
+                    )
                     self.update_signal.emit(lowest_price)
 
                     if current_key_mode:
                         # 钥匙卡模式
                         if lowest_price > current_ideal:
-                            print('当前价格：', lowest_price, '高于理想价格',
-                                  current_ideal, '，免费刷新价格')
-                            self.buybot.freerefresh(
-                                good_postion=self.mouse_position)
+                            threading.Thread(
+                                target=print,
+                                args=(
+                                    f"当前价格：{lowest_price} 高于理想价格 {current_ideal} ，免费刷新价格",
+                                ),
+                            ).start()
+                            self.buybot.freerefresh(good_postion=self.mouse_position)
                         else:
-                            print('当前价格：', lowest_price, '低于理想价格',
-                                  current_ideal, '，购买一张后循环结束')
+                            threading.Thread(
+                                target=print,
+                                args=(
+                                    f"当前价格：{lowest_price} 低于理想价格 {current_ideal} ，购买一张后循环结束",
+                                ),
+                            ).start()
                             self.buybot.refresh(is_convertible=False)
                             self.set_running(False)
-                            print('停止循环')
+                            threading.Thread(target=print, args=("停止循环",)).start()
                     else:
                         # 正常模式
                         if lowest_price > current_unacceptable:
-                            print('当前价格：', lowest_price, '高于最高价格',
-                                  current_unacceptable, '，免费刷新价格')
-                            self.buybot.freerefresh(
-                                good_postion=self.mouse_position)
+                            threading.Thread(
+                                target=print,
+                                args=(
+                                    f"当前价格：{lowest_price} 高于最高价格 {current_unacceptable} ，免费刷新价格",
+                                ),
+                            ).start()
+                            self.buybot.freerefresh(good_postion=self.mouse_position)
                         elif lowest_price > current_ideal:
-                            print('当前价格：', lowest_price, '高于理想价格',
-                                  current_ideal, '，刷新价格')
-                            self.buybot.refresh(
-                                is_convertible=current_convertible)
+                            threading.Thread(
+                                target=print,
+                                args=(
+                                    f"当前价格：{lowest_price} 高于理想价格 {current_ideal} ，刷新价格",
+                                ),
+                            ).start()
+                            self.buybot.refresh(is_convertible=current_convertible)
                         else:
-                            print('当前价格：', lowest_price, '低于理想价格',
-                                  current_ideal, '，开始购买')
+                            threading.Thread(
+                                target=print,
+                                args=(
+                                    f"当前价格：{lowest_price} 低于理想价格 {current_ideal} ，开始购买",
+                                ),
+                            ).start()
                             self.buybot.buy(is_convertible=current_convertible)
                 except Exception as e:
                     print(f"操作失败: {str(e)}")
@@ -131,15 +157,15 @@ def runApp():
     mainWindow.setupUi(window)
 
     # 初始化输入部分
-    mainWindow.textEdit_ideal_price.setText('0')
-    mainWindow.textEdit_unacceptable_price.setText('0')
-    mainWindow.textEdit_loop_gap.setText('150')
+    mainWindow.textEdit_ideal_price.setText("0")
+    mainWindow.textEdit_unacceptable_price.setText("0")
+    mainWindow.textEdit_loop_gap.setText("150")
     mainWindow.is_convertiable.setChecked(True)
     mainWindow.is_key_mode.setChecked(False)
 
     # 创建监控线程
     key_monitor = KeyMonitor()
-    worker = Worker(BuyBot(ocr_engine='paddleocr'))  # 或 'easyocr'
+    worker = Worker(BuyBot(ocr_engine="easyocr"))  # 'easyocr' 或 'paddleocr'
 
     # 信号连接
     def handle_key_event(x):
@@ -152,21 +178,18 @@ def runApp():
     def handle_text_change():
         try:
             ideal = int(mainWindow.textEdit_ideal_price.toPlainText())
-            unaccept = int(
-                mainWindow.textEdit_unacceptable_price.toPlainText())
+            unaccept = int(mainWindow.textEdit_unacceptable_price.toPlainText())
             loop_gap = int(mainWindow.textEdit_loop_gap.toPlainText())
             is_convertible = mainWindow.is_convertiable.isChecked()
             is_key_mode = mainWindow.is_key_mode.isChecked()
-            worker.update_params(
-                ideal, unaccept, is_convertible, is_key_mode, loop_gap)
+            worker.update_params(ideal, unaccept, is_convertible, is_key_mode, loop_gap)
             mainWindow.label_lowest_price_value.setStyleSheet("color: black;")
         except ValueError:
             mainWindow.label_lowest_price_value.setStyleSheet("color: red;")
 
     # 确保两个输入框都连接
     mainWindow.textEdit_ideal_price.textChanged.connect(handle_text_change)
-    mainWindow.textEdit_unacceptable_price.textChanged.connect(
-        handle_text_change)
+    mainWindow.textEdit_unacceptable_price.textChanged.connect(handle_text_change)
     mainWindow.textEdit_loop_gap.textChanged.connect(handle_text_change)
     mainWindow.is_convertiable.stateChanged.connect(handle_text_change)
     mainWindow.is_key_mode.stateChanged.connect(handle_text_change)

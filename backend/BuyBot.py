@@ -83,7 +83,7 @@ class BuyBot:
 
     def buy(self, is_convertible):
         if is_convertible:
-            mouse_click(self.postion_isconvertible_max_shopping_number)
+            # mouse_click(self.postion_isconvertible_max_shopping_number)
             mouse_click(self.postion_isconvertible_buy_button)
         else:
             mouse_click(self.postion_notconvertiable_max_shopping_number)
@@ -105,7 +105,7 @@ class BuyBot:
 
 
 def main():
-    bot = BuyBot(ocr_engine='paddleocr')  # 这里可以切换为 'easyocr' 或 'paddleocr'
+    bot = BuyBot(ocr_engine='easyocr')  # 这里可以切换为 'easyocr' 或 'paddleocr'
     is_convertiable = False
     bot.detect_price(is_convertible=is_convertiable, debug_mode=True)
 
