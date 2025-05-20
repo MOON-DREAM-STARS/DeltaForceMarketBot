@@ -54,61 +54,58 @@ def get_screenshot(debug_mode=False):
 
 
 def get_windowshot(range: list, debug_mode=False):
-    """
-    范围截图函数，使用mss加速
+    """优化的范围截图函数"""
+    # 使用静态变量缓存mss实例
+    if not hasattr(get_windowshot, "sct"):
+        get_windowshot.sct = mss.mss()
 
-    range：截图范围，[left, top, right, bottom]，支持比例
-    """
-    with mss.mss() as sct:
-        screen_size = pyautogui.size()
-        if range[0] < 1:
-            range = [
-                int(screen_size.width * range[0]),
-                int(screen_size.height * range[1]),
-                int(screen_size.width * range[2]),
-                int(screen_size.height * range[3]),
-            ]
-        monitor = {
-            "left": range[0],
-            "top": range[1],
-            "width": range[2] - range[0],
-            "height": range[3] - range[1],
-        }
-        img = sct.grab(monitor)
-        screenshot = Image.frombytes("RGB", img.size, img.rgb)
+    screen_size = pyautogui.size()
+    if range[0] < 1:
+        range = [
+            int(screen_size.width * range[0]),
+            int(screen_size.height * range[1]),
+            int(screen_size.width * range[2]),
+            int(screen_size.height * range[3]),
+        ]
+    monitor = {
+        "left": range[0],
+        "top": range[1],
+        "width": range[2] - range[0],
+        "height": range[3] - range[1],
+    }
 
-        if debug_mode:
-            screenshot.save("screenshot.png")
+    # 直接获取numpy数组，避免PIL转换
+    img = get_windowshot.sct.grab(monitor)
+    img_np = np.array(img, dtype=np.uint8)
 
-        # 返回前转换为numpy数组并手动释放PIL资源
-        result = np.array(screenshot)
-        screenshot.close()
+    # 仅BGR通道组合，跳过alpha通道
+    img_np = img_np[:, :, :3]
 
-        # 手动清理
-        del img
-        del screenshot
-        del monitor
-        gc.collect()
+    # 仅在调试模式下保存图像
+    if debug_mode:
+        Image.fromarray(img_np).save("screenshot.png")
 
-        return result
+    # 手动清理
+    del monitor
+
+    return img_np
 
 
-def mouse_click(positon: list, num: int = 1):
-    """
-    postion：鼠标点击位置，[x, y]
-
-    num：点击次数，默认点击一次
-    """
-    x = positon[0]
-    y = positon[1]
+def mouse_click(position: list, num: int = 1):
+    """优化的鼠标点击函数"""
+    x = position[0]
+    y = position[1]
     if x < 1:
         screen_size = pyautogui.size()
         x = int(screen_size.width * x)
         y = int(screen_size.height * y)
-    for i in range(num):
-        pyautogui.moveTo(x, y)
-        pyautogui.mouseDown()
-        pyautogui.mouseUp()
+
+    # 直接移动到目标位置
+    pyautogui.moveTo(x, y, duration=0.01)  # 减少移动时间但保留少量防止游戏不识别
+
+    # 快速点击
+    for _ in range(num):
+        pyautogui.click()
 
 
 def get_mouse_position():

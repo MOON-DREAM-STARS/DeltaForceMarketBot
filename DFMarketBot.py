@@ -49,6 +49,8 @@ class Worker(QThread):
         self.mouse_position_lock.unlock()
 
     def run(self):
+        import threading
+
         while True:
             # 获取运行状态
             self.lock.lock()
@@ -68,11 +70,26 @@ class Worker(QThread):
                     # 进入商品页面
                     mouse_click(self.mouse_position, num=1)
 
+                    # 预先点击最大购买量，与OCR并行执行，但保存线程对象以便后续等待完成
+                    pre_click_thread = None
+                    if current_convertible:
+                        pre_click_thread = threading.Thread(
+                            target=mouse_click,
+                            args=(
+                                self.buybot.postion_isconvertible_max_shopping_number,
+                            ),
+                        )
+                        pre_click_thread.start()
+
                     # 检测逻辑
                     lowest_price = self.buybot.detect_price(
                         is_convertible=current_convertible, debug_mode=False
                     )
                     self.update_signal.emit(lowest_price)
+
+                    # 在执行后续操作前，确保预点击已完成
+                    if pre_click_thread and pre_click_thread.is_alive():
+                        pre_click_thread.join()  # 等待点击线程完成
 
                     if current_key_mode:
                         # 钥匙卡模式
@@ -117,14 +134,13 @@ class Worker(QThread):
                             )
                             self.buybot.refresh(is_convertible=current_convertible)
                         else:
-                            print(
-                                "当前价格：",
-                                lowest_price,
-                                "低于理想价格",
-                                current_ideal,
-                                "，开始购买",
-                            )
-                            self.buybot.buy(is_convertible=current_convertible)
+                            # 如果已经预点击过最大数量，修改BuyBot.buy调用
+                            if current_convertible:
+                                # 直接点击购买按钮，因为已经点过最大购买量
+                                mouse_click(self.buybot.postion_isconvertible_buy_button)
+                            else:
+                                # 没有预点击，使用原来的buy方法
+                                self.buybot.buy(is_convertible=current_convertible)
 
                     # 周期性强制垃圾回收
                     gc.collect()
