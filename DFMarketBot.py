@@ -1,12 +1,11 @@
 import sys
+import gc  # 添加垃圾回收模块
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import QObject, pyqtSignal, Qt, QThread
 from GUI.AppGUI import Ui_MainWindow
 from backend.BuyBot import BuyBot
 from backend.utils import *
 import keyboard
-
-import threading
 
 
 class KeyMonitor(QObject):
@@ -69,12 +68,6 @@ class Worker(QThread):
                     # 进入商品页面
                     mouse_click(self.mouse_position, num=1)
 
-                    # 无论是否is_convertible，都先点击最大购买量
-                    threading.Thread(
-                        target=mouse_click,
-                        args=(self.buybot.postion_isconvertible_max_shopping_number,),
-                    ).start()
-
                     # 检测逻辑
                     lowest_price = self.buybot.detect_price(
                         is_convertible=current_convertible, debug_mode=False
@@ -84,49 +77,58 @@ class Worker(QThread):
                     if current_key_mode:
                         # 钥匙卡模式
                         if lowest_price > current_ideal:
-                            threading.Thread(
-                                target=print,
-                                args=(
-                                    f"当前价格：{lowest_price} 高于理想价格 {current_ideal} ，免费刷新价格",
-                                ),
-                            ).start()
+                            print(
+                                "当前价格：",
+                                lowest_price,
+                                "高于理想价格",
+                                current_ideal,
+                                "，免费刷新价格",
+                            )
                             self.buybot.freerefresh(good_postion=self.mouse_position)
                         else:
-                            threading.Thread(
-                                target=print,
-                                args=(
-                                    f"当前价格：{lowest_price} 低于理想价格 {current_ideal} ，购买一张后循环结束",
-                                ),
-                            ).start()
+                            print(
+                                "当前价格：",
+                                lowest_price,
+                                "低于理想价格",
+                                current_ideal,
+                                "，购买一张后循环结束",
+                            )
                             self.buybot.refresh(is_convertible=False)
                             self.set_running(False)
-                            threading.Thread(target=print, args=("停止循环",)).start()
+                            print("停止循环")
                     else:
                         # 正常模式
                         if lowest_price > current_unacceptable:
-                            threading.Thread(
-                                target=print,
-                                args=(
-                                    f"当前价格：{lowest_price} 高于最高价格 {current_unacceptable} ，免费刷新价格",
-                                ),
-                            ).start()
+                            print(
+                                "当前价格：",
+                                lowest_price,
+                                "高于最高价格",
+                                current_unacceptable,
+                                "，免费刷新价格",
+                            )
                             self.buybot.freerefresh(good_postion=self.mouse_position)
                         elif lowest_price > current_ideal:
-                            threading.Thread(
-                                target=print,
-                                args=(
-                                    f"当前价格：{lowest_price} 高于理想价格 {current_ideal} ，刷新价格",
-                                ),
-                            ).start()
+                            print(
+                                "当前价格：",
+                                lowest_price,
+                                "高于理想价格",
+                                current_ideal,
+                                "，刷新价格",
+                            )
                             self.buybot.refresh(is_convertible=current_convertible)
                         else:
-                            threading.Thread(
-                                target=print,
-                                args=(
-                                    f"当前价格：{lowest_price} 低于理想价格 {current_ideal} ，开始购买",
-                                ),
-                            ).start()
+                            print(
+                                "当前价格：",
+                                lowest_price,
+                                "低于理想价格",
+                                current_ideal,
+                                "，开始购买",
+                            )
                             self.buybot.buy(is_convertible=current_convertible)
+
+                    # 周期性强制垃圾回收
+                    gc.collect()
+
                 except Exception as e:
                     print(f"操作失败: {str(e)}")
                 self.msleep(self.loop_gap)
@@ -165,7 +167,7 @@ def runApp():
 
     # 创建监控线程
     key_monitor = KeyMonitor()
-    worker = Worker(BuyBot(ocr_engine="easyocr"))  # 'easyocr' 或 'paddleocr'
+    worker = Worker(BuyBot(ocr_engine="easyocr"))
 
     # 信号连接
     def handle_key_event(x):
