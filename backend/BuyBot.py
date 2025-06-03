@@ -73,7 +73,7 @@ class BuyBot:
 
         return self.lowest_price
 
-    def buy(self, is_convertible, pre_clicked=False):
+    def buy(self, is_convertible, pre_clicked=True):
         """
         执行购买操作
         is_convertible: 是否可兑换

@@ -50,6 +50,9 @@ class Worker(QThread):
 
     def run(self):
         import threading
+        
+        # 添加状态变量，跟踪是否在商品页面
+        in_product_page = False
 
         while True:
             # 获取运行状态
@@ -67,9 +70,11 @@ class Worker(QThread):
                     current_key_mode = self.is_key_mode
                     self.param_lock.unlock()
 
-                    # 进入商品页面
-                    mouse_click(self.mouse_position, num=1)
-
+                    # 仅在需要时进入商品页面
+                    if not in_product_page:
+                        mouse_click(self.mouse_position, num=1)
+                        in_product_page = True
+                    
                     # 预先点击最大购买量，与OCR并行执行，但保存线程对象以便后续等待完成
                     pre_click_thread = None
                     if current_convertible:
@@ -77,6 +82,14 @@ class Worker(QThread):
                             target=mouse_click,
                             args=(
                                 self.buybot.postion_isconvertible_max_shopping_number,
+                            ),
+                        )
+                        pre_click_thread.start()
+                    else:
+                        pre_click_thread = threading.Thread(
+                            target=mouse_click,
+                            args=(
+                                self.buybot.postion_notconvertiable_max_shopping_number,
                             ),
                         )
                         pre_click_thread.start()
@@ -102,6 +115,7 @@ class Worker(QThread):
                                 "，免费刷新价格",
                             )
                             self.buybot.freerefresh(good_postion=self.mouse_position)
+                            # 已经重新进入商品页面，保持in_product_page=True
                         else:
                             print(
                                 "当前价格：",
@@ -113,6 +127,7 @@ class Worker(QThread):
                             self.buybot.refresh(is_convertible=False)
                             self.set_running(False)
                             print("停止循环")
+                            in_product_page = False  # 循环停止，重置状态
                     else:
                         # 正常模式
                         if lowest_price > current_unacceptable:
@@ -124,31 +139,39 @@ class Worker(QThread):
                                 "，免费刷新价格",
                             )
                             self.buybot.freerefresh(good_postion=self.mouse_position)
-                        elif lowest_price > current_ideal:
+                            # 已经重新进入商品页面，保持in_product_page=True
+                        elif lowest_price <= current_unacceptable and lowest_price > current_ideal:
                             print(
                                 "当前价格：",
                                 lowest_price,
+                                "低于最高价格",
+                                current_unacceptable,
                                 "高于理想价格",
                                 current_ideal,
                                 "，刷新价格",
                             )
                             self.buybot.refresh(is_convertible=current_convertible)
-                        else:
-                            # 如果已经预点击过最大数量，修改BuyBot.buy调用
-                            if current_convertible:
-                                # 直接点击购买按钮，因为已经点过最大购买量
-                                mouse_click(self.buybot.postion_isconvertible_buy_button)
-                            else:
-                                # 没有预点击，使用原来的buy方法
-                                self.buybot.buy(is_convertible=current_convertible)
+                            # 刷新后仍在商品页面，保持in_product_page=True
+                        elif lowest_price <= current_ideal:
+                            print(
+                                "当前价格：",
+                                lowest_price,
+                                "低于理想价格",
+                                current_ideal,
+                                "，开始购买",
+                            )
+                            self.buybot.buy(is_convertible=current_convertible)
+                            # 购买后仍在商品页面，保持in_product_page=True
 
                     # 周期性强制垃圾回收
                     gc.collect()
 
                 except Exception as e:
                     print(f"操作失败: {str(e)}")
+                    in_product_page = False  # 出错时重置状态，下次重新进入
                 self.msleep(self.loop_gap)
             else:
+                in_product_page = False  # 不运行时重置状态
                 self.msleep(100)
 
     def update_params(self, ideal, unacceptable, convertible, key_mode, loop_gap):
