@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import easyocr
 import numpy as np
 import time
@@ -318,16 +316,14 @@ class BuyBot:
 
         return result
 
-    def buy(self, is_convertible, pre_clicked=True):
+    def buy(self, is_convertible):
         """
         执行购买操作
         is_convertible: 是否可兑换
-        pre_clicked: 是否已经预先点击过最大购买量
         """
         if is_convertible:
-            if not pre_clicked:
-                # 只在没有预点击时才点击最大购买量
-                mouse_click(self.postion_isconvertible_max_shopping_number)
+            # 点击最大购买量
+            mouse_click(self.postion_isconvertible_max_shopping_number)
             # 点击购买按钮
             mouse_click(self.postion_isconvertible_buy_button)
         else:

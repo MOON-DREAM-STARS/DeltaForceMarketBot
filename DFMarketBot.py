@@ -49,8 +49,6 @@ class Worker(QThread):
         self.mouse_position_lock.unlock()
 
     def run(self):
-        import threading
-        
         # 添加状态变量，跟踪是否在商品页面
         in_product_page = False
 
@@ -74,25 +72,6 @@ class Worker(QThread):
                     if not in_product_page:
                         mouse_click(self.mouse_position, num=1)
                         in_product_page = True
-                    
-                    # 预先点击最大购买量，与OCR并行执行，但保存线程对象以便后续等待完成
-                    pre_click_thread = None
-                    if current_convertible:
-                        pre_click_thread = threading.Thread(
-                            target=mouse_click,
-                            args=(
-                                self.buybot.postion_isconvertible_max_shopping_number,
-                            ),
-                        )
-                        pre_click_thread.start()
-                    else:
-                        pre_click_thread = threading.Thread(
-                            target=mouse_click,
-                            args=(
-                                self.buybot.postion_notconvertiable_max_shopping_number,
-                            ),
-                        )
-                        pre_click_thread.start()
 
                     # 检测逻辑
                     lowest_price = self.buybot.detect_price(
@@ -104,10 +83,6 @@ class Worker(QThread):
                     if lowest_price is None:
                         print("OCR识别失败，跳过本次循环")
                         continue  # 跳过本次循环，继续下一次
-
-                    # 在执行后续操作前，确保预点击已完成
-                    if pre_click_thread and pre_click_thread.is_alive():
-                        pre_click_thread.join()  # 等待点击线程完成
 
                     if current_key_mode:
                         # 钥匙卡模式
@@ -145,7 +120,10 @@ class Worker(QThread):
                             )
                             self.buybot.freerefresh(good_postion=self.mouse_position)
                             # 已经重新进入商品页面，保持in_product_page=True
-                        elif lowest_price <= current_unacceptable and lowest_price > current_ideal:
+                        elif (
+                            lowest_price <= current_unacceptable
+                            and lowest_price > current_ideal
+                        ):
                             print(
                                 "当前价格：",
                                 lowest_price,
