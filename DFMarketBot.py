@@ -100,6 +100,11 @@ class Worker(QThread):
                     )
                     self.update_signal.emit(lowest_price)
 
+                    # 在价格比较前添加None检查
+                    if lowest_price is None:
+                        print("OCR识别失败，跳过本次循环")
+                        continue  # 跳过本次循环，继续下一次
+
                     # 在执行后续操作前，确保预点击已完成
                     if pre_click_thread and pre_click_thread.is_alive():
                         pre_click_thread.join()  # 等待点击线程完成
