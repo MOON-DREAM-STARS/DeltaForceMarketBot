@@ -15,12 +15,18 @@ else:
 
 
 class BuyBot:
-    def __init__(self, ocr_engine="easyocr"):
+    def __init__(self, ocr_engine="easyocr", screenshot_method="mss"):
         self.ocr_engine = ocr_engine.lower()
+        self.screenshot_method = screenshot_method.lower()
+
         if self.ocr_engine == "easyocr":
-            self.reader = easyocr.Reader(["en"], gpu=False)
+            self.reader = easyocr.Reader(["ch_sim","en"], gpu=False)
         else:
             raise ValueError("ocr_engine 仅支持 'easyocr'")
+
+        if self.screenshot_method not in ["mss", "win32"]:
+            raise ValueError("screenshot_method 仅支持 'mss' 或 'win32'")
+
         self.range_isconvertible_lowest_price = [
             2179 / 2560,
             1078 / 1440,
@@ -40,18 +46,24 @@ class BuyBot:
         self.postion_isconvertible_buy_button = [2189 / 2560, 0.7979]
         self.postion_notconvertiable_buy_button = [2186 / 2560, 1225 / 1440]
         self.lowest_price = None
-        print(f"初始化完成，当前OCR引擎: {self.ocr_engine}")
+        print(
+            f"初始化完成，当前OCR引擎: {self.ocr_engine}，截图方法: {self.screenshot_method}"
+        )
 
     def detect_price(self, is_convertible, debug_mode=False):
         try:
-            # 截图已经返回numpy数组了，不需要再转换
+            # 使用指定的截图方法
             if is_convertible:
                 img_np = get_windowshot(
-                    self.range_isconvertible_lowest_price, debug_mode=debug_mode
+                    self.range_isconvertible_lowest_price,
+                    method=self.screenshot_method,
+                    debug_mode=debug_mode,
                 )
             else:
                 img_np = get_windowshot(
-                    self.range_notconvertible_lowest_price, debug_mode=debug_mode
+                    self.range_notconvertible_lowest_price,
+                    method=self.screenshot_method,
+                    debug_mode=debug_mode,
                 )
 
             # 处理OCR识别
@@ -106,9 +118,14 @@ class BuyBot:
 
 
 def main():
-    bot = BuyBot(ocr_engine="easyocr")
-    is_convertiable = False
-    bot.detect_price(is_convertible=is_convertiable, debug_mode=True)
+    # 测试两种截图方法
+    print("测试MSS方法...")
+    bot_mss = BuyBot(ocr_engine="easyocr", screenshot_method="mss")
+    bot_mss.detect_price(is_convertible=False, debug_mode=True)
+
+    print("\n测试Win32方法...")
+    bot_win32 = BuyBot(ocr_engine="easyocr", screenshot_method="win32")
+    bot_win32.detect_price(is_convertible=False, debug_mode=True)
 
 
 if __name__ == "__main__":
