@@ -151,6 +151,10 @@ class BuyBot:
 
         print(f"正在解析价格文本: '{text}'")
 
+        # 首先处理字符混淆问题
+        text = self.fix_ocr_confusion(text)
+        print(f"字符修正后: '{text}'")
+
         # 情况1: 正常的逗号分隔千分位，如 "4,177" 或 "1,234,567"
         if "," in text and "." not in text:
             try:
@@ -239,6 +243,80 @@ class BuyBot:
 
         print(f"无法解析价格文本: '{text}'")
         return None
+
+    def fix_ocr_confusion(self, text):
+        """
+        修正OCR常见的字符混淆问题
+        """
+        if not text:
+            return text
+
+        # 创建字符映射表
+        char_fixes = {
+            # 数字0的常见误识别
+            "o": "0",  # 小写字母o -> 数字0
+            "O": "0",  # 大写字母O -> 数字0
+            "g": "0",  # 字母g -> 数字0 (下半部分可能被识别为g)
+            "q": "0",  # 字母q -> 数字0
+            "Q": "0",  # 大写字母Q -> 数字0
+            # 数字1的常见误识别
+            "l": "1",  # 小写字母l -> 数字1
+            "I": "1",  # 大写字母I -> 数字1
+            "|": "1",  # 竖线 -> 数字1
+            # 数字5的常见误识别
+            "S": "5",  # 大写字母S -> 数字5
+            "s": "5",  # 小写字母s -> 数字5
+            # 数字6的常见误识别
+            "G": "6",  # 大写字母G -> 数字6
+            "b": "6",  # 小写字母b -> 数字6
+            # 数字8的常见误识别
+            "B": "8",  # 大写字母B -> 数字8
+            # 数字2的常见误识别
+            "Z": "2",  # 大写字母Z -> 数字2
+            "z": "2",  # 小写字母z -> 数字2
+            # 千分位分隔符的常见误识别
+            ".": ",",  # 点 -> 逗号 (在某些情况下)
+        }
+
+        result = text
+
+        # 智能替换：只有在特定上下文中才替换
+        for i, char in enumerate(text):
+            if char in char_fixes:
+                # 检查上下文：如果周围都是数字或分隔符，则进行替换
+                context_left = text[i - 1] if i > 0 else ""
+                context_right = text[i + 1] if i < len(text) - 1 else ""
+
+                # 如果字符两边都是数字、逗号或点，则很可能是数字识别错误
+                is_number_context = (
+                    (context_left.isdigit() or context_left in ",.")
+                    and (context_right.isdigit() or context_right in ",.")
+                ) or (
+                    # 或者如果是在开头/结尾且另一边是数字
+                    (i == 0 and context_right.isdigit())
+                    or (i == len(text) - 1 and context_left.isdigit())
+                )
+
+                # 特殊处理：如果整个字符串主要由数字和少量字母组成，则替换
+                digit_count = sum(1 for c in text if c.isdigit())
+                total_chars = len(
+                    text.replace(" ", "").replace(",", "").replace(".", "")
+                )
+                is_mostly_numbers = digit_count / max(total_chars, 1) > 0.6
+
+                if is_number_context or is_mostly_numbers:
+                    # 特殊处理点号：只有在不是小数点的情况下才替换为逗号
+                    if char == "." and char_fixes[char] == ",":
+                        # 检查是否可能是千分位分隔符
+                        if context_right and len(context_right) >= 3:
+                            # 检查右边是否有3位数字
+                            right_part = text[i + 1 :]
+                            if len(right_part) >= 3 and right_part[:3].isdigit():
+                                result = result[:i] + "," + result[i + 1 :]
+                    else:
+                        result = result[:i] + char_fixes[char] + result[i + 1 :]
+
+        return result
 
     def buy(self, is_convertible, pre_clicked=True):
         """
