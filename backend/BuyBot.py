@@ -1,4 +1,4 @@
-import easyocr
+from paddleocr import PaddleOCR
 import numpy as np
 import time
 import os
@@ -14,14 +14,14 @@ else:
 
 
 class BuyBot:
-    def __init__(self, ocr_engine="easyocr", screenshot_method="mss"):
+    def __init__(self, ocr_engine="paddleocr", screenshot_method="mss"):
         self.ocr_engine = ocr_engine.lower()
         self.screenshot_method = screenshot_method.lower()
 
-        if self.ocr_engine == "easyocr":
-            self.reader = easyocr.Reader(["ch_sim", "en"], gpu=False)
+        if self.ocr_engine == "paddleocr":
+            self.reader = PaddleOCR(use_angle_cls=True, lang="ch")
         else:
-            raise ValueError("ocr_engine 仅支持 'easyocr'")
+            raise ValueError("ocr_engine 仅支持 'paddleocr'")
 
         if self.screenshot_method not in ["mss", "win32"]:
             raise ValueError("screenshot_method 仅支持 'mss' 或 'win32'")
@@ -78,7 +78,7 @@ class BuyBot:
             f"初始化完成，当前OCR引擎: {self.ocr_engine}，截图方法: {self.screenshot_method}"
         )
 
-    def detect_price(self, is_convertible, debug_mode=False):
+    def detect_price(self, is_convertible, debug_mode=True):
         try:
             # 使用指定的截图方法
             screenshot_range = (
@@ -99,8 +99,15 @@ class BuyBot:
                 self.lowest_price = None
                 return self.lowest_price
 
-            # 优化OCR处理 - 直接处理结果，避免重复变量赋值
-            ocr_results = self.reader.readtext(img_np)
+            # PaddleOCR处理 - 返回的是 [line_result, ...]，其中每个line_result是 [bbox, text, confidence]
+            ocr_results = self.reader.ocr(img_np)
+
+            # 处理PaddleOCR的结果格式
+            if ocr_results and ocr_results[0]:
+                ocr_results = ocr_results[0]  # 取第一个结果
+            else:
+                ocr_results = []
+
             if debug_mode:
                 print(f"OCR识别结果: {ocr_results}")
 
@@ -110,12 +117,14 @@ class BuyBot:
                 self.lowest_price = None
                 return self.lowest_price
 
-            # 优化价格提取 - 使用生成器和next()提前退出
+            # 优化价格提取 - PaddleOCR返回格式是 [bbox, text, confidence]
             price_text = next(
                 (
-                    detection[1]
+                    detection[1]  # PaddleOCR中文本在索引1
                     for detection in ocr_results
-                    if any(char.isdigit() for char in detection[1])
+                    if detection
+                    and len(detection) >= 2
+                    and any(char.isdigit() for char in detection[1])
                 ),
                 None,
             )
@@ -314,11 +323,11 @@ class BuyBot:
 def main():
     # 测试两种截图方法
     print("测试MSS方法...")
-    bot_mss = BuyBot(ocr_engine="easyocr", screenshot_method="mss")
+    bot_mss = BuyBot(ocr_engine="paddleocr", screenshot_method="mss")
     bot_mss.detect_price(is_convertible=False, debug_mode=True)
 
     print("\n测试Win32方法...")
-    bot_win32 = BuyBot(ocr_engine="easyocr", screenshot_method="win32")
+    bot_win32 = BuyBot(ocr_engine="paddleocr", screenshot_method="win32")
     bot_win32.detect_price(is_convertible=False, debug_mode=True)
 
 

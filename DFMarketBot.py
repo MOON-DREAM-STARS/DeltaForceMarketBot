@@ -79,11 +79,6 @@ class Worker(QThread):
                     )
                     self.update_signal.emit(lowest_price)
 
-                    # # 在价格比较前添加None检查（有问题暂时注释掉）
-                    # if lowest_price is None:
-                    #     print("OCR识别失败，跳过本次循环")
-                    #     continue  # 跳过本次循环，继续下一次
-
                     if current_key_mode:
                         # 钥匙卡模式
                         if lowest_price > current_ideal:
@@ -189,7 +184,7 @@ def runApp():
 
     # 创建监控线程
     key_monitor = KeyMonitor()
-    worker = Worker(BuyBot(ocr_engine="easyocr"))
+    worker = Worker(BuyBot(ocr_engine="paddleocr"))  # 改为paddleocr
 
     # 信号连接
     def handle_key_event(x):
