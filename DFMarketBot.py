@@ -79,10 +79,10 @@ class Worker(QThread):
                     )
                     self.update_signal.emit(lowest_price)
 
-                    # 在价格比较前添加None检查
-                    if lowest_price is None:
-                        print("OCR识别失败，跳过本次循环")
-                        continue  # 跳过本次循环，继续下一次
+                    # # 在价格比较前添加None检查（有问题暂时注释掉）
+                    # if lowest_price is None:
+                    #     print("OCR识别失败，跳过本次循环")
+                    #     continue  # 跳过本次循环，继续下一次
 
                     if current_key_mode:
                         # 钥匙卡模式
