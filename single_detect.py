@@ -13,6 +13,8 @@ from queue import Queue
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 import cv2
+import argparse
+import sys
 
 # 导入优化的鼠标点击函数
 from backend.utils import mouse_click
@@ -22,6 +24,31 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
+
+# ==================== 全局调试配置 ====================
+DEBUG_MODE = False
+
+
+def set_debug_mode(enabled):
+    """设置调试模式"""
+    global DEBUG_MODE
+    DEBUG_MODE = enabled
+
+
+def debug_print(*args, **kwargs):
+    """只在调试模式下打印"""
+    if DEBUG_MODE:
+        print(*args, **kwargs)
+
+
+def debug_save_image(img, filename):
+    """只在调试模式下保存图像"""
+    if DEBUG_MODE:
+        if hasattr(img, "save"):
+            img.save(filename)
+        else:
+            cv2.imwrite(filename, img)
+
 
 # ==================== 配置常量 ====================
 BUTTON_POS = (440, 220)
@@ -133,9 +160,11 @@ class OCRProcessor:
             else:
                 gray = img_array
 
-            # 保存灰度图用于调试
-            debug_name = f"debug_gray_{self.processor_id}_{'price' if is_price else 'quantity'}.png"
-            cv2.imwrite(debug_name, gray)
+            # 只在调试模式下保存灰度图
+            debug_save_image(
+                gray,
+                f"debug_gray_{self.processor_id}_{'price' if is_price else 'quantity'}.png",
+            )
 
             # 直接返回灰度图，不做进一步的二值化处理
             return gray
@@ -213,7 +242,9 @@ class OCRProcessor:
                 low_text=0.1,
             )
 
-            print(f"[DEBUG] OCR#{self.processor_id} 价格识别结果(带置信度): {result}")
+            debug_print(
+                f"[DEBUG] OCR#{self.processor_id} 价格识别结果(带置信度): {result}"
+            )
 
             if not result:
                 return 0
@@ -227,7 +258,7 @@ class OCRProcessor:
                     price = self.extract_price(text)
                     if price is not None:
                         candidates.append((price, confidence, text))
-                        print(
+                        debug_print(
                             f"[DEBUG] OCR#{self.processor_id} 找到价格候选: {price}, 置信度: {confidence:.2f}, 原文: '{text}'"
                         )
 
@@ -243,7 +274,7 @@ class OCRProcessor:
             for txt in sorted(result_simple, key=len, reverse=True):
                 price = self.extract_price(txt)
                 if price is not None:
-                    print(
+                    debug_print(
                         f"[DEBUG] OCR#{self.processor_id} 简单模式找到价格: {price}, 原文: '{txt}'"
                     )
                     return price
@@ -257,7 +288,7 @@ class OCRProcessor:
     def process_quantity_image(self, img, region_index):
         """处理数量图像并提取数量"""
         try:
-            print(
+            debug_print(
                 f"[DEBUG] OCR#{self.processor_id} 数量区域{region_index+1} 开始处理..."
             )
 
@@ -275,7 +306,9 @@ class OCRProcessor:
                 low_text=0.1,
             )
 
-            print(f"[DEBUG] OCR#{self.processor_id} 数量识别结果(带置信度): {result}")
+            debug_print(
+                f"[DEBUG] OCR#{self.processor_id} 数量识别结果(带置信度): {result}"
+            )
 
             if result:
                 # 处理所有识别结果，包括低置信度的
@@ -287,7 +320,7 @@ class OCRProcessor:
                         quantity = self.extract_quantity(text)
                         if quantity is not None:
                             candidates.append((quantity, confidence, text))
-                            print(
+                            debug_print(
                                 f"[DEBUG] OCR#{self.processor_id} 找到数量候选: {quantity}, 置信度: {confidence:.2f}, 原文: '{text}'"
                             )
 
@@ -303,12 +336,12 @@ class OCRProcessor:
                 for txt in sorted(result_simple, key=len, reverse=True):
                     quantity = self.extract_quantity(txt)
                     if quantity is not None:
-                        print(
+                        debug_print(
                             f"[DEBUG] OCR#{self.processor_id} 简单模式找到数量: {quantity}, 原文: '{txt}'"
                         )
                         return quantity
 
-            print(f"[DEBUG] OCR#{self.processor_id} 未识别到有效数量")
+            debug_print(f"[DEBUG] OCR#{self.processor_id} 未识别到有效数量")
             return 0
 
         except Exception as e:
@@ -343,11 +376,11 @@ def crop_images_from_fullscreen(fullscreen_img):
             quantity_crop = fullscreen_img.crop((left, top, left + width, top + height))
             quantity_imgs.append(quantity_crop)
 
-        # 保存分割后的图像用于调试
+        # 只在调试模式下保存分割后的图像
         for idx, img in enumerate(price_imgs):
-            img.save(f"debug_price_{idx+1}_cropped.png")
+            debug_save_image(img, f"debug_price_{idx+1}_cropped.png")
         for idx, img in enumerate(quantity_imgs):
-            img.save(f"debug_quantity_{idx+1}_cropped.png")
+            debug_save_image(img, f"debug_quantity_{idx+1}_cropped.png")
 
         return price_imgs, quantity_imgs
 
@@ -382,12 +415,12 @@ def capture_and_process():
         time.sleep(0.15)  # 等待界面加载
 
         # 2. 全屏截图（一次性截图，速度更快）
-        print("[DEBUG] 开始全屏截图...")
+        debug_print("[DEBUG] 开始全屏截图...")
         fullscreen_img = pyautogui.screenshot()
-        print(f"[DEBUG] 全屏截图完成，尺寸: {fullscreen_img.size}")
+        debug_print(f"[DEBUG] 全屏截图完成，尺寸: {fullscreen_img.size}")
 
-        # 保存全屏截图用于调试
-        fullscreen_img.save("debug_fullscreen.png")
+        # 只在调试模式下保存全屏截图
+        debug_save_image(fullscreen_img, "debug_fullscreen.png")
 
         # 3. 立即退出详情界面（减少界面占用时间）
         pyautogui.press("esc")
@@ -418,7 +451,7 @@ def capture_and_process():
 def process_ocr_parallel(price_imgs, quantity_imgs, ts):
     """并行处理OCR任务"""
     try:
-        print(f"[DEBUG] 开始并行OCR处理，时间戳: {ts}")
+        debug_print(f"[DEBUG] 开始并行OCR处理，时间戳: {ts}")
 
         # 提交三个并行任务
         futures = []
@@ -438,7 +471,7 @@ def process_ocr_parallel(price_imgs, quantity_imgs, ts):
         for future in as_completed(futures):
             region_index, price, quantity = future.result()
             results[region_index] = (price, quantity)
-            print(
+            debug_print(
                 f"[DEBUG] 区域{region_index+1}处理完成: 价格={price}, 数量={quantity}"
             )
 
@@ -446,7 +479,7 @@ def process_ocr_parallel(price_imgs, quantity_imgs, ts):
         prices = [result[0] for result in results]
         quantities = [result[1] for result in results]
 
-        print(f"[DEBUG] 所有OCR任务完成: 价格={prices}, 数量={quantities}")
+        debug_print(f"[DEBUG] 所有OCR任务完成: 价格={prices}, 数量={quantities}")
 
         # 将结果放入队列
         result_queue.put((ts, prices, quantities))
@@ -573,18 +606,42 @@ def print_region_map():
     print("★ 当前监控区域")
 
 
+def parse_arguments():
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description="单区域价格监控程序")
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="启用调试模式（输出详细信息并保存调试图片）",
+    )
+    return parser.parse_args()
+
+
 def main():
     global should_exit
 
+    # 解析命令行参数
+    args = parse_arguments()
+    set_debug_mode(args.debug)
+
     print("=" * 60)
-    print("单区域价格监控程序 v3.2 (全屏截图+图像分割版)")
+    print("单区域价格监控程序 v3.3 (优化调试输出版)")
     print("=" * 60)
     print(f"当前监控区域: {REGION_NAME} (区域#{REGION_ID})")
     print(f"监控内容: 价格 + 出售数量 (3个并行OCR)")
     print(f"截图策略: 全屏截图 -> 图像分割")
-    print(f"图像预处理: 灰度转换 + 自适应阈值")
+    print(f"图像预处理: 仅灰度转换")
     print(f"置信度策略: 接受低置信度结果")
+    print(f"调试模式: {'启用' if DEBUG_MODE else '禁用'}")
     print(f"按 F7 开始/停止监控，按 Ctrl+C 退出程序")
+
+    if DEBUG_MODE:
+        print("\n[调试模式] 将保存以下调试文件:")
+        print("  - debug_fullscreen.png (全屏截图)")
+        print("  - debug_price_X_cropped.png (价格区域截图)")
+        print("  - debug_quantity_X_cropped.png (数量区域截图)")
+        print("  - debug_gray_X_price.png (价格灰度图)")
+        print("  - debug_gray_X_quantity.png (数量灰度图)")
 
     print_region_map()
 
