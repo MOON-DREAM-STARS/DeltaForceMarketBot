@@ -12,6 +12,7 @@ import gc
 from queue import Queue
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
+import cv2
 
 # 导入优化的鼠标点击函数
 from backend.utils import mouse_click
@@ -27,29 +28,18 @@ BUTTON_POS = (440, 220)
 REGION = (430, 180, 1830, 820)
 OUT_CSV = "single_price.csv"
 
-# 详情界面价格区域 (right, bottom, width, height)
-PRICE_REGIONS_RB = [
-    (268, 953, 106, 19),  # 最低价
-    (421, 953, 106, 19),  # 次低价
-    (574, 953, 106, 19),  # 第三低价
+# 详情界面全屏截图后的相对坐标
+# 这些坐标是相对于全屏截图的绝对坐标
+FULLSCREEN_PRICE_REGIONS = [
+    (162, 934, 106, 19),  # 最低价 (left, top, width, height)
+    (315, 934, 106, 19),  # 次低价
+    (468, 934, 106, 19),  # 第三低价
 ]
 
-# 详情界面出售数量区域 (right, bottom, width, height)
-QUANTITY_REGIONS_RB = [
-    (281, 927, 151, 685),  # 第一个价格区域的出售数量
-    (434, 927, 151, 685),  # 第二个价格区域的出售数量
-    (587, 927, 151, 685),  # 第三个价格区域的出售数量
-]
-
-# 转换为左上角坐标格式
-PRICE_REGIONS = [
-    (right - width, bottom - height, width, height)
-    for right, bottom, width, height in PRICE_REGIONS_RB
-]
-
-QUANTITY_REGIONS = [
-    (right - width, bottom - height, width, height)
-    for right, bottom, width, height in QUANTITY_REGIONS_RB
+FULLSCREEN_QUANTITY_REGIONS = [
+    (130, 242, 151, 685),  # 第一个价格区域的出售数量 (left, top, width, height)
+    (283, 242, 151, 685),  # 第二个价格区域的出售数量
+    (436, 242, 151, 685),  # 第三个价格区域的出售数量
 ]
 
 # 区域配置
@@ -111,6 +101,7 @@ class OCRProcessor:
             "s": "5",
             "G": "6",
             "b": "6",
+            "?": "7",
             "B": "8",
             "Z": "2",
             "z": "2",
@@ -129,6 +120,33 @@ class OCRProcessor:
         self.digit_pattern = re.compile(r"\d")
         self.non_digit_comma_pattern = re.compile(r"[^\d,]")
         self.non_digit_pattern = re.compile(r"[^\d]")
+
+    def preprocess_image(self, img, is_price=True):
+        """图像预处理：只转换为灰度图，保留灰度信息"""
+        try:
+            # 转换为numpy数组
+            img_array = np.array(img)
+
+            # 转换为灰度图
+            if len(img_array.shape) == 3:
+                gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            else:
+                gray = img_array
+
+            # 保存灰度图用于调试
+            debug_name = f"debug_gray_{self.processor_id}_{'price' if is_price else 'quantity'}.png"
+            cv2.imwrite(debug_name, gray)
+
+            # 直接返回灰度图，不做进一步的二值化处理
+            return gray
+
+        except Exception as e:
+            logger.error(f"OCR#{self.processor_id} 图像预处理错误: {e}")
+            # 如果预处理失败，返回原始灰度图
+            img_array = np.array(img)
+            if len(img_array.shape) == 3:
+                return cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
+            return img_array
 
     def fix_text(self, text):
         """修正OCR识别错误的字符"""
@@ -181,56 +199,114 @@ class OCRProcessor:
     def process_price_image(self, img):
         """处理价格图像并提取价格"""
         try:
-            arr = np.array(img)
-            result = self.reader.readtext(arr, detail=0, paragraph=False)
+            # 预处理图像
+            processed_img = self.preprocess_image(img, is_price=True)
+
+            # 使用更低的置信度阈值获取更多结果
+            result = self.reader.readtext(
+                processed_img,
+                detail=True,
+                paragraph=False,
+                width_ths=0.3,
+                height_ths=0.3,
+                text_threshold=0.1,
+                low_text=0.1,
+            )
+
+            print(f"[DEBUG] OCR#{self.processor_id} 价格识别结果(带置信度): {result}")
 
             if not result:
                 return 0
 
-            # 直接处理所有识别结果，优先处理最长文本
-            for txt in sorted(result, key=len, reverse=True):
+            # 处理所有识别结果，包括低置信度的
+            candidates = []
+            for item in result:
+                if len(item) >= 2:
+                    text = item[1]
+                    confidence = item[2] if len(item) > 2 else 0.0
+                    price = self.extract_price(text)
+                    if price is not None:
+                        candidates.append((price, confidence, text))
+                        print(
+                            f"[DEBUG] OCR#{self.processor_id} 找到价格候选: {price}, 置信度: {confidence:.2f}, 原文: '{text}'"
+                        )
+
+            if candidates:
+                # 优先选择置信度高的，但也接受低置信度的合理结果
+                candidates.sort(key=lambda x: x[1], reverse=True)
+                return candidates[0][0]
+
+            # 如果没有找到，尝试无detail模式
+            result_simple = self.reader.readtext(
+                processed_img, detail=0, paragraph=False
+            )
+            for txt in sorted(result_simple, key=len, reverse=True):
                 price = self.extract_price(txt)
                 if price is not None:
+                    print(
+                        f"[DEBUG] OCR#{self.processor_id} 简单模式找到价格: {price}, 原文: '{txt}'"
+                    )
                     return price
 
-            # 尝试组合文本
-            combined = "".join(result)
-            return self.extract_price(combined) or 0
+            return 0
 
         except Exception as e:
             logger.error(f"OCR#{self.processor_id} 价格处理错误: {e}")
             return 0
 
     def process_quantity_image(self, img, region_index):
-        """处理数量图像并提取数量（不使用预处理）"""
+        """处理数量图像并提取数量"""
         try:
             print(
                 f"[DEBUG] OCR#{self.processor_id} 数量区域{region_index+1} 开始处理..."
             )
 
-            arr = np.array(img)
-            result = self.reader.readtext(arr, detail=0, paragraph=False)
+            # 预处理图像
+            processed_img = self.preprocess_image(img, is_price=False)
 
-            print(f"[DEBUG] OCR#{self.processor_id} 识别结果: {result}")
+            # 使用更低的置信度阈值获取更多结果
+            result = self.reader.readtext(
+                processed_img,
+                detail=True,
+                paragraph=False,
+                width_ths=0.3,
+                height_ths=0.3,
+                text_threshold=0.1,
+                low_text=0.1,
+            )
+
+            print(f"[DEBUG] OCR#{self.processor_id} 数量识别结果(带置信度): {result}")
 
             if result:
-                # 直接处理所有识别结果，优先处理最长文本
-                for txt in sorted(result, key=len, reverse=True):
+                # 处理所有识别结果，包括低置信度的
+                candidates = []
+                for item in result:
+                    if len(item) >= 2:
+                        text = item[1]
+                        confidence = item[2] if len(item) > 2 else 0.0
+                        quantity = self.extract_quantity(text)
+                        if quantity is not None:
+                            candidates.append((quantity, confidence, text))
+                            print(
+                                f"[DEBUG] OCR#{self.processor_id} 找到数量候选: {quantity}, 置信度: {confidence:.2f}, 原文: '{text}'"
+                            )
+
+                if candidates:
+                    # 优先选择置信度高的，但也接受低置信度的合理结果
+                    candidates.sort(key=lambda x: x[1], reverse=True)
+                    return candidates[0][0]
+
+                # 如果没有找到，尝试无detail模式
+                result_simple = self.reader.readtext(
+                    processed_img, detail=0, paragraph=False
+                )
+                for txt in sorted(result_simple, key=len, reverse=True):
                     quantity = self.extract_quantity(txt)
                     if quantity is not None:
                         print(
-                            f"[DEBUG] OCR#{self.processor_id} 成功提取数量: {quantity}"
+                            f"[DEBUG] OCR#{self.processor_id} 简单模式找到数量: {quantity}, 原文: '{txt}'"
                         )
                         return quantity
-
-                # 尝试组合文本
-                combined = "".join(result)
-                quantity = self.extract_quantity(combined)
-                if quantity is not None:
-                    print(
-                        f"[DEBUG] OCR#{self.processor_id} 组合文本提取数量: {quantity}"
-                    )
-                    return quantity
 
             print(f"[DEBUG] OCR#{self.processor_id} 未识别到有效数量")
             return 0
@@ -249,6 +325,35 @@ should_exit = False
 # 使用更大的线程池支持并行OCR处理
 executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix="OCR-Worker")
 result_queue = Queue()
+
+
+# ==================== 图像分割函数 ====================
+def crop_images_from_fullscreen(fullscreen_img):
+    """从全屏截图中分割出价格和数量区域"""
+    try:
+        # 分割价格区域
+        price_imgs = []
+        for left, top, width, height in FULLSCREEN_PRICE_REGIONS:
+            price_crop = fullscreen_img.crop((left, top, left + width, top + height))
+            price_imgs.append(price_crop)
+
+        # 分割数量区域
+        quantity_imgs = []
+        for left, top, width, height in FULLSCREEN_QUANTITY_REGIONS:
+            quantity_crop = fullscreen_img.crop((left, top, left + width, top + height))
+            quantity_imgs.append(quantity_crop)
+
+        # 保存分割后的图像用于调试
+        for idx, img in enumerate(price_imgs):
+            img.save(f"debug_price_{idx+1}_cropped.png")
+        for idx, img in enumerate(quantity_imgs):
+            img.save(f"debug_quantity_{idx+1}_cropped.png")
+
+        return price_imgs, quantity_imgs
+
+    except Exception as e:
+        logger.error(f"图像分割错误: {e}")
+        return [], []
 
 
 # ==================== 核心功能函数 ====================
@@ -270,27 +375,37 @@ def process_single_region(processor, price_img, quantity_img, region_index):
 
 
 def capture_and_process():
-    """捕获截图并并行处理OCR"""
+    """捕获全屏截图并并行处理OCR"""
     try:
         # 1. 点击进入详情界面
         mouse_click(BUTTON_POS)
-        time.sleep(0.15)  # 减少等待时间
+        time.sleep(0.15)  # 等待界面加载
 
-        # 2. 快速截图价格和数量区域
-        ts = time.strftime("%Y-%m-%d %H:%M:%S")
-        price_imgs = [pyautogui.screenshot(region=r) for r in PRICE_REGIONS]
-        quantity_imgs = [pyautogui.screenshot(region=r) for r in QUANTITY_REGIONS]
+        # 2. 全屏截图（一次性截图，速度更快）
+        print("[DEBUG] 开始全屏截图...")
+        fullscreen_img = pyautogui.screenshot()
+        print(f"[DEBUG] 全屏截图完成，尺寸: {fullscreen_img.size}")
 
-        # 保存原始截图
-        for idx, img in enumerate(price_imgs):
-            img.save(f"debug_price_{idx+1}_original.png")
-        for idx, img in enumerate(quantity_imgs):
-            img.save(f"debug_quantity_{idx+1}_original.png")
+        # 保存全屏截图用于调试
+        fullscreen_img.save("debug_fullscreen.png")
 
-        # 3. 立即退出详情界面
+        # 3. 立即退出详情界面（减少界面占用时间）
         pyautogui.press("esc")
 
-        # 4. 提交并行OCR任务
+        # 4. 从全屏截图中分割出目标区域
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        price_imgs, quantity_imgs = crop_images_from_fullscreen(fullscreen_img)
+
+        # 释放全屏截图内存
+        fullscreen_img.close()
+
+        if len(price_imgs) != 3 or len(quantity_imgs) != 3:
+            logger.error(
+                f"图像分割失败: 价格区域{len(price_imgs)}个, 数量区域{len(quantity_imgs)}个"
+            )
+            return False
+
+        # 5. 提交并行OCR任务
         executor.submit(process_ocr_parallel, price_imgs, quantity_imgs, ts)
 
         return True
@@ -303,6 +418,8 @@ def capture_and_process():
 def process_ocr_parallel(price_imgs, quantity_imgs, ts):
     """并行处理OCR任务"""
     try:
+        print(f"[DEBUG] 开始并行OCR处理，时间戳: {ts}")
+
         # 提交三个并行任务
         futures = []
         for i in range(3):
@@ -321,10 +438,15 @@ def process_ocr_parallel(price_imgs, quantity_imgs, ts):
         for future in as_completed(futures):
             region_index, price, quantity = future.result()
             results[region_index] = (price, quantity)
+            print(
+                f"[DEBUG] 区域{region_index+1}处理完成: 价格={price}, 数量={quantity}"
+            )
 
         # 提取价格和数量列表
         prices = [result[0] for result in results]
         quantities = [result[1] for result in results]
+
+        print(f"[DEBUG] 所有OCR任务完成: 价格={prices}, 数量={quantities}")
 
         # 将结果放入队列
         result_queue.put((ts, prices, quantities))
@@ -455,10 +577,13 @@ def main():
     global should_exit
 
     print("=" * 60)
-    print("单区域价格监控程序 v3.0 (并行OCR版)")
+    print("单区域价格监控程序 v3.2 (全屏截图+图像分割版)")
     print("=" * 60)
     print(f"当前监控区域: {REGION_NAME} (区域#{REGION_ID})")
     print(f"监控内容: 价格 + 出售数量 (3个并行OCR)")
+    print(f"截图策略: 全屏截图 -> 图像分割")
+    print(f"图像预处理: 灰度转换 + 自适应阈值")
+    print(f"置信度策略: 接受低置信度结果")
     print(f"按 F7 开始/停止监控，按 Ctrl+C 退出程序")
 
     print_region_map()
