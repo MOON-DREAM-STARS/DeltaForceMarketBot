@@ -3,14 +3,14 @@ import time
 import csv
 import re
 import pyautogui
-from PIL import Image
+from PIL import Image, ImageEnhance, ImageFilter
 import easyocr
 import numpy as np
 import keyboard
 import threading
 import gc
 from queue import Queue
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import logging
 
 # 导入优化的鼠标点击函数
@@ -91,10 +91,11 @@ REGION_NAME = f"R{TARGET_ROW+1}C{TARGET_COL+1}"
 class OCRProcessor:
     """OCR处理器，优化内存使用和处理效率"""
 
-    def __init__(self):
-        logger.info("初始化 OCR 识别器...")
+    def __init__(self, processor_id):
+        self.processor_id = processor_id
+        logger.info(f"初始化 OCR 识别器 #{processor_id}...")
         self.reader = easyocr.Reader(["ch_sim", "en"], gpu=False)
-        logger.info("OCR 识别器初始化完成!")
+        logger.info(f"OCR 识别器 #{processor_id} 初始化完成!")
 
         # 字符修正映射表
         self.char_fixes = {
@@ -197,46 +198,79 @@ class OCRProcessor:
             return self.extract_price(combined) or 0
 
         except Exception as e:
-            logger.error(f"价格OCR处理错误: {e}")
+            logger.error(f"OCR#{self.processor_id} 价格处理错误: {e}")
             return 0
 
-    def process_quantity_image(self, img):
-        """处理数量图像并提取数量"""
+    def process_quantity_image(self, img, region_index):
+        """处理数量图像并提取数量（不使用预处理）"""
         try:
+            print(
+                f"[DEBUG] OCR#{self.processor_id} 数量区域{region_index+1} 开始处理..."
+            )
+
             arr = np.array(img)
             result = self.reader.readtext(arr, detail=0, paragraph=False)
 
-            if not result:
-                return 0
+            print(f"[DEBUG] OCR#{self.processor_id} 识别结果: {result}")
 
-            # 直接处理所有识别结果，优先处理最长文本
-            for txt in sorted(result, key=len, reverse=True):
-                quantity = self.extract_quantity(txt)
+            if result:
+                # 直接处理所有识别结果，优先处理最长文本
+                for txt in sorted(result, key=len, reverse=True):
+                    quantity = self.extract_quantity(txt)
+                    if quantity is not None:
+                        print(
+                            f"[DEBUG] OCR#{self.processor_id} 成功提取数量: {quantity}"
+                        )
+                        return quantity
+
+                # 尝试组合文本
+                combined = "".join(result)
+                quantity = self.extract_quantity(combined)
                 if quantity is not None:
+                    print(
+                        f"[DEBUG] OCR#{self.processor_id} 组合文本提取数量: {quantity}"
+                    )
                     return quantity
 
-            # 尝试组合文本
-            combined = "".join(result)
-            return self.extract_quantity(combined) or 0
+            print(f"[DEBUG] OCR#{self.processor_id} 未识别到有效数量")
+            return 0
 
         except Exception as e:
-            logger.error(f"数量OCR处理错误: {e}")
+            logger.error(f"OCR#{self.processor_id} 数量处理错误: {e}")
             return 0
 
 
 # ==================== 全局变量和初始化 ====================
-ocr_processor = OCRProcessor()
+# 创建三个独立的OCR处理器
+ocr_processors = [OCRProcessor(i + 1) for i in range(3)]
 is_running = False
 should_exit = False
 
-# 使用线程池和队列优化异步处理
-executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="OCR-Worker")
+# 使用更大的线程池支持并行OCR处理
+executor = ThreadPoolExecutor(max_workers=6, thread_name_prefix="OCR-Worker")
 result_queue = Queue()
 
 
 # ==================== 核心功能函数 ====================
+def process_single_region(processor, price_img, quantity_img, region_index):
+    """处理单个区域的价格和数量"""
+    try:
+        price = processor.process_price_image(price_img)
+        quantity = processor.process_quantity_image(quantity_img, region_index)
+
+        # 立即释放图像内存
+        price_img.close()
+        quantity_img.close()
+
+        return region_index, price, quantity
+
+    except Exception as e:
+        logger.error(f"单区域处理错误 (区域{region_index}): {e}")
+        return region_index, 0, 0
+
+
 def capture_and_process():
-    """捕获截图并异步处理OCR"""
+    """捕获截图并并行处理OCR"""
     try:
         # 1. 点击进入详情界面
         mouse_click(BUTTON_POS)
@@ -247,18 +281,17 @@ def capture_and_process():
         price_imgs = [pyautogui.screenshot(region=r) for r in PRICE_REGIONS]
         quantity_imgs = [pyautogui.screenshot(region=r) for r in QUANTITY_REGIONS]
 
-        # 保存截图到本地作为调试信息（可选）
+        # 保存原始截图
         for idx, img in enumerate(price_imgs):
-            img.save(f"debug_price_{idx+1}.png")
+            img.save(f"debug_price_{idx+1}_original.png")
         for idx, img in enumerate(quantity_imgs):
-            img.save(f"debug_quantity_{idx+1}.png")
+            img.save(f"debug_quantity_{idx+1}_original.png")
 
         # 3. 立即退出详情界面
         pyautogui.press("esc")
-        pyautogui.moveTo(100, 900)
 
-        # 4. 提交OCR任务到线程池
-        future = executor.submit(process_ocr_batch, price_imgs, quantity_imgs, ts)
+        # 4. 提交并行OCR任务
+        executor.submit(process_ocr_parallel, price_imgs, quantity_imgs, ts)
 
         return True
 
@@ -267,31 +300,37 @@ def capture_and_process():
         return False
 
 
-def process_ocr_batch(price_imgs, quantity_imgs, ts):
-    """批量处理OCR任务"""
+def process_ocr_parallel(price_imgs, quantity_imgs, ts):
+    """并行处理OCR任务"""
     try:
-        prices = []
-        quantities = []
+        # 提交三个并行任务
+        futures = []
+        for i in range(3):
+            future = executor.submit(
+                process_single_region,
+                ocr_processors[i],
+                price_imgs[i],
+                quantity_imgs[i],
+                i,
+            )
+            futures.append(future)
 
-        # 处理价格图像
-        for i, img in enumerate(price_imgs):
-            price = ocr_processor.process_price_image(img)
-            prices.append(price)
-            img.close()
-            del img
+        # 等待所有任务完成并收集结果
+        results = [None, None, None]  # 预分配结果数组
 
-        # 处理数量图像
-        for i, img in enumerate(quantity_imgs):
-            quantity = ocr_processor.process_quantity_image(img)
-            quantities.append(quantity)
-            img.close()
-            del img
+        for future in as_completed(futures):
+            region_index, price, quantity = future.result()
+            results[region_index] = (price, quantity)
+
+        # 提取价格和数量列表
+        prices = [result[0] for result in results]
+        quantities = [result[1] for result in results]
 
         # 将结果放入队列
         result_queue.put((ts, prices, quantities))
 
     except Exception as e:
-        logger.error(f"OCR批处理错误: {e}")
+        logger.error(f"并行OCR处理错误: {e}")
         result_queue.put((ts, [0, 0, 0], [0, 0, 0]))
 
 
@@ -349,11 +388,11 @@ def monitor_prices():
     try:
         while not should_exit:
             if is_running:
-                # 执行截图和OCR
+                # 执行截图和OCR（无需额外等待，OCR时间即为等待时间）
                 if capture_and_process():
                     # 处理OCR结果
                     try:
-                        ts, prices, quantities = result_queue.get(timeout=1.0)
+                        ts, prices, quantities = result_queue.get(timeout=5.0)
 
                         # 写入CSV
                         csv_writer.write_row([ts, REGION_NAME] + prices + quantities)
@@ -377,7 +416,6 @@ def monitor_prices():
                     gc.collect()
                     last_cleanup = current_time
 
-                time.sleep(0.5)  # 控制频率
             else:
                 time.sleep(0.1)
 
@@ -417,10 +455,10 @@ def main():
     global should_exit
 
     print("=" * 60)
-    print("单区域价格监控程序 v2.1")
+    print("单区域价格监控程序 v3.0 (并行OCR版)")
     print("=" * 60)
     print(f"当前监控区域: {REGION_NAME} (区域#{REGION_ID})")
-    print(f"监控内容: 价格 + 出售数量")
+    print(f"监控内容: 价格 + 出售数量 (3个并行OCR)")
     print(f"按 F7 开始/停止监控，按 Ctrl+C 退出程序")
 
     print_region_map()
